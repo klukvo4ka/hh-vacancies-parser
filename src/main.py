@@ -17,6 +17,8 @@ async def run() -> None:
     print(f"Query: {SEARCH_QUERY}")
     print(f"Loaded: {len(raw_items)} vacancies")
     print(f"Parsed: {len(vacancies)} vacancies")
+    if vacancies:
+        print(f"First salary: {vacancies[0].salary_text}")
 
 
 def main() -> None:
