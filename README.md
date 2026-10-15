@@ -21,6 +21,7 @@ python -m src.main "Python developer"
   - styled header, frozen header row and filters
   - fixed, readable column widths
   - protection against formula injection from API text
+- Optional HeadHunter OAuth: an existing access token or an application token obtained from client credentials
 - Safe output file names: files are always written inside `output/`
 - Clear error messages and exit codes for API, network and file errors
 
@@ -29,6 +30,7 @@ python -m src.main "Python developer"
 - Python 3.12+
 - [httpx](https://www.python-httpx.org/) — async HTTP client
 - [openpyxl](https://openpyxl.readthedocs.io/) — Excel workbook generation
+- [python-dotenv](https://github.com/theskumar/python-dotenv) — loading credentials from `.env`
 - `asyncio`, `argparse` from the standard library
 - [HeadHunter API](https://api.hh.ru) — public vacancy search
 
@@ -45,7 +47,41 @@ pip install -r requirements.txt
 
 On Windows, activate the virtual environment with `.venv\Scripts\activate`.
 
-No API key or token is configured; the tool uses anonymous public vacancy search (see [HeadHunter API Notes](#headhunter-api-notes)).
+Credentials are optional; see [HeadHunter Authentication](#headhunter-authentication).
+
+## HeadHunter Authentication
+
+Authorization is optional. When credentials are configured, every API request carries an `Authorization: Bearer <token>` header; otherwise the tool runs anonymously. Credentials are read from environment variables or from a local `.env` file:
+
+```bash
+cp .env.example .env
+# then edit .env
+```
+
+`.env` is ignored by Git. Real environment variables take precedence over values in `.env`.
+
+**Option A — existing access token (recommended for repeated use)**
+
+```dotenv
+HH_ACCESS_TOKEN=your_token_here
+```
+
+The token is sent as is. The owner of a registered HeadHunter application can view its current application token in the [HH developer area](https://dev.hh.ru/admin).
+
+**Option B — application credentials**
+
+```dotenv
+HH_CLIENT_ID=your_client_id
+HH_CLIENT_SECRET=your_client_secret
+```
+
+At startup the tool requests an application token once (`grant_type=client_credentials`) and keeps it in memory for that run only; it is never written to disk. According to the [official API documentation](https://api.hh.ru/openapi/redoc), application tokens do not expire, each new request **revokes the previously issued application token**, and a new one can be requested at most once every 5 minutes. For frequent runs, or if the token is used elsewhere, prefer Option A.
+
+`HH_CLIENT_ID` and `HH_CLIENT_SECRET` come from an application registered on the [HeadHunter developer platform](https://dev.hh.ru/). If `HH_ACCESS_TOKEN` is set it takes priority. Setting only one of `HH_CLIENT_ID` / `HH_CLIENT_SECRET` is treated as a configuration error.
+
+**Anonymous mode.** Without credentials the tool still works, but HeadHunter may apply restrictions to anonymous requests, such as a captcha or HTTP 403. On an anonymous HTTP 403 the error message suggests configuring credentials; this is a hint, not a guarantee that authorization will resolve it.
+
+**Security.** Never commit `.env`, never publish your client secret, and keep access tokens out of screenshots and logs. The tool does not print tokens or secrets.
 
 ## Usage
 
@@ -98,7 +134,7 @@ Saved to: /.../output/vacancies.xlsx
 | Code | Meaning |
 |---|---|
 | `0` | Success, including a search with no results |
-| `1` | Runtime error: HH API, network or Excel save failure |
+| `1` | Runtime error: HH API, authorization, network or Excel save failure |
 | `2` | Invalid command-line usage |
 | `130` | Interrupted by the user |
 
@@ -136,6 +172,7 @@ The workbook has one sheet, `Vacancies`, with these columns:
 
 ```text
 CLI query
+→ access token resolution (optional, once per run)
 → HH API requests (one page at a time)
 → raw JSON parsing into Vacancy objects
 → salary normalization
@@ -162,6 +199,7 @@ hh-vacancies-parser/
 ├── src/
 │   ├── api/
 │   │   ├── __init__.py
+│   │   ├── auth.py            # token resolution and application token request
 │   │   └── client.py          # async HH API client and pagination
 │   ├── exporters/
 │   │   ├── __init__.py
@@ -177,13 +215,16 @@ hh-vacancies-parser/
 │   └── main.py                # CLI entry point
 ├── tests/                     # pytest suite (offline, mocked HTTP)
 │   ├── __init__.py
+│   ├── conftest.py
 │   ├── helpers.py
+│   ├── test_auth.py
 │   ├── test_client.py
 │   ├── test_deduplication.py
 │   ├── test_excel.py
 │   ├── test_main.py
 │   ├── test_parser.py
 │   └── test_salary.py
+├── .env.example
 ├── .gitignore
 ├── pytest.ini
 ├── README.md
@@ -200,7 +241,7 @@ The API client only handles HTTP and returns raw dictionaries; parsing, deduplic
 - Search depth is limited to 2000 results per query. The tool never requests pages beyond this limit, so `--max` values above 2000 load at most 2000 vacancies.
 - Results change over time as vacancies are published and closed, so repeated runs can differ.
 - Requests send a project-specific `User-Agent`, as HH requires.
-- HeadHunter's documentation notes that anonymous vacancy search (without an authorization token) may require a captcha after the first request, and HH may apply other access or anti-abuse checks to anonymous traffic. This tool does not handle captchas or authorization.
+- HeadHunter's documentation notes that anonymous vacancy search (without an authorization token) may require a captcha after the first request, and HH may apply other access or anti-abuse checks to anonymous traffic. The tool does not solve captchas; configuring [authentication](#headhunter-authentication) is the supported alternative.
 
 During development, live requests from the development network returned HTTP 403, so functional validation was performed with mocked API responses.
 
@@ -221,6 +262,7 @@ It covers:
 - deduplication rules
 - Excel content, styling, hyperlinks and empty exports
 - CLI argument validation, output messages and exit codes
+- authorization: token priority, the application token request, bearer headers and auth error messages
 
 Live API access from the development network was restricted, so behaviour against the real HeadHunter API is covered by mocked responses rather than live requests.
 

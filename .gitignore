@@ -1,3 +1,6 @@
+# Local credentials
+.env
+
 # Virtual environments
 .venv/
 venv/

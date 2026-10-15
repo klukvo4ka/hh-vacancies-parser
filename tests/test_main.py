@@ -33,7 +33,9 @@ def run_cli(output_dir: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
     """Run main() against a fake HH handler and capture exit code and streams."""
 
     def run(argv: list[str], handler: Handler) -> Result:
-        monkeypatch.setattr(src.main, "HHApiClient", lambda: HHApiClient(transport=httpx.MockTransport(handler)))
+        monkeypatch.setattr(
+            src.main, "HHApiClient", lambda **kwargs: HHApiClient(transport=httpx.MockTransport(handler), **kwargs)
+        )
         try:
             code = src.main.main(argv)
         except SystemExit as exc:
@@ -152,7 +154,11 @@ class TestRuntimeErrors:
     @pytest.mark.parametrize(
         ("handler", "message"),
         [
-            (lambda r: httpx.Response(403, json={"errors": [{"type": "forbidden"}]}), "Error: HH API returned HTTP 403 for /vacancies (forbidden)"),
+            (
+                lambda r: httpx.Response(403, json={"errors": [{"type": "forbidden"}]}),
+                "Error: HH API returned HTTP 403 for /vacancies (forbidden). Anonymous access may be restricted; "
+                "configure HH_ACCESS_TOKEN or HH_CLIENT_ID/HH_CLIENT_SECRET",
+            ),
             (lambda r: httpx.Response(500, text="x" * 5000), "Error: HH API returned HTTP 500 for /vacancies"),
             (lambda r: httpx.Response(200, text="<html>"), "Error: HH API returned invalid JSON for /vacancies"),
         ],
@@ -211,3 +217,130 @@ class TestRuntimeErrors:
         monkeypatch.setattr(src.main, "parse_vacancies", broken)
         with pytest.raises(ZeroDivisionError):
             run_cli(["Python"], FakeHH(10))
+
+
+FAKE_TOKEN = "fake-access-token-for-tests"
+FAKE_APP_TOKEN = "fake-application-token-for-tests"
+FAKE_SECRET = "fake-client-secret-do-not-leak"
+
+
+class FakeHHWithTokenEndpoint(FakeHH):
+    """/vacancies plus a POST /token endpoint, sharing one request log."""
+
+    def __init__(self, found: int, *, token_status: int = 200, vacancy_status: int | None = None) -> None:
+        super().__init__(found)
+        self.token_status = token_status
+        self.vacancy_status = vacancy_status
+        self.token_requests: list[httpx.Request] = []
+
+    @property
+    def vacancy_requests(self) -> list[httpx.Request]:
+        return [request for request in self.requests if request.url.path == "/vacancies"]
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/token":
+            self.token_requests.append(request)
+            if self.token_status != 200:
+                return httpx.Response(self.token_status, json={"error": "invalid_client"})
+            return httpx.Response(200, json={"access_token": FAKE_APP_TOKEN, "token_type": "bearer"})
+        if self.vacancy_status is not None:
+            self.requests.append(request)
+            return httpx.Response(self.vacancy_status, json={"errors": [{"type": "forbidden"}]})
+        return super().__call__(request)
+
+
+class TestAuthorization:
+    @pytest.fixture
+    def configure(self, monkeypatch: pytest.MonkeyPatch):
+        """Set auth config on src.main and route the token request through the same fake transport."""
+
+        def apply(fake: FakeHHWithTokenEndpoint, **values: str | None) -> None:
+            for name, value in values.items():
+                monkeypatch.setattr(src.main, name, value)
+            resolve = src.main.resolve_access_token
+
+            async def resolve_with_fake(*args):
+                return await resolve(*args, transport=httpx.MockTransport(fake))
+
+            monkeypatch.setattr(src.main, "resolve_access_token", resolve_with_fake)
+
+        return apply
+
+    def test_direct_access_token_skips_token_endpoint(self, run_cli, configure) -> None:
+        fake = FakeHHWithTokenEndpoint(500)
+        configure(fake, HH_ACCESS_TOKEN=FAKE_TOKEN)
+
+        result = run_cli(["Python", "--max", "300"], fake)
+
+        assert result.code == 0
+        assert fake.token_requests == []
+        assert {request.headers["Authorization"] for request in fake.vacancy_requests} == {f"Bearer {FAKE_TOKEN}"}
+
+    def test_application_credentials_request_one_token_for_all_pages(self, run_cli, configure) -> None:
+        fake = FakeHHWithTokenEndpoint(500)
+        configure(fake, HH_CLIENT_ID="fake-client-id", HH_CLIENT_SECRET=FAKE_SECRET)
+
+        result = run_cli(["Python", "--max", "300"], fake)
+
+        assert result.code == 0
+        assert len(fake.token_requests) == 1
+        assert len(fake.vacancy_requests) == 3
+        assert {request.headers["Authorization"] for request in fake.vacancy_requests} == {f"Bearer {FAKE_APP_TOKEN}"}
+
+    def test_success_output_is_unchanged_and_token_free(self, run_cli, configure, output_dir: Path) -> None:
+        fake = FakeHHWithTokenEndpoint(500)
+        configure(fake, HH_CLIENT_ID="fake-client-id", HH_CLIENT_SECRET=FAKE_SECRET)
+
+        result = run_cli(["Python", "--max", "100"], fake)
+
+        assert result.out.splitlines()[:5] == [
+            "Query: Python",
+            "Loaded: 100 vacancies",
+            "Parsed: 100 vacancies",
+            "Unique: 100 vacancies",
+            "Removed duplicates: 0",
+        ]
+        assert result.err == ""
+        assert FAKE_APP_TOKEN not in result.out and FAKE_SECRET not in result.out
+
+    def test_token_failure_stops_before_any_vacancy_request(self, run_cli, configure, output_dir: Path) -> None:
+        fake = FakeHHWithTokenEndpoint(500, token_status=400)
+        configure(fake, HH_CLIENT_ID="fake-client-id", HH_CLIENT_SECRET=FAKE_SECRET)
+
+        result = run_cli(["Python"], fake)
+
+        assert result.code == 1
+        assert result.out == ""
+        assert result.err == "Error: Failed to obtain HH application token: HTTP 400 (invalid_client)\n"
+        assert "Traceback" not in result.err and FAKE_SECRET not in result.err
+        assert fake.vacancy_requests == []
+        assert not output_dir.exists()
+
+    def test_half_configured_credentials_exit_1_without_requests(self, run_cli, configure) -> None:
+        fake = FakeHHWithTokenEndpoint(500)
+        configure(fake, HH_CLIENT_ID="fake-client-id")
+
+        result = run_cli(["Python"], fake)
+
+        assert result.code == 1
+        assert result.err == "Error: Incomplete HH credentials: set both HH_CLIENT_ID and HH_CLIENT_SECRET\n"
+        assert fake.token_requests == [] and fake.vacancy_requests == []
+
+    def test_authenticated_403_does_not_blame_anonymous_access(self, run_cli, configure) -> None:
+        fake = FakeHHWithTokenEndpoint(500, vacancy_status=403)
+        configure(fake, HH_ACCESS_TOKEN=FAKE_TOKEN)
+
+        result = run_cli(["Python"], fake)
+
+        assert result.code == 1
+        assert result.err == "Error: HH API returned HTTP 403 for /vacancies (forbidden)\n"
+        assert FAKE_TOKEN not in result.err
+
+    def test_invalid_cli_input_makes_no_token_request(self, run_cli, configure) -> None:
+        fake = FakeHHWithTokenEndpoint(500)
+        configure(fake, HH_CLIENT_ID="fake-client-id", HH_CLIENT_SECRET=FAKE_SECRET)
+
+        result = run_cli(["Python", "--max", "0"], fake)
+
+        assert result.code == 2
+        assert fake.token_requests == [] and fake.vacancy_requests == []

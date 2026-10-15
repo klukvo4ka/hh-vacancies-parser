@@ -16,17 +16,25 @@ from src.config import (
 class HHApiError(RuntimeError):
     """Raised when the HeadHunter API request fails or returns an unexpected response."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class HHApiClient:
     def __init__(
         self,
         *,
+        access_token: str | None = None,
         timeout: float = HH_REQUEST_TIMEOUT,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
+        headers = {"User-Agent": HH_USER_AGENT}
+        if access_token:
+            headers["Authorization"] = f"Bearer {access_token}"
         self._http = httpx.AsyncClient(
             base_url=HH_API_BASE_URL,
-            headers={"User-Agent": HH_USER_AGENT},
+            headers=headers,
             timeout=timeout,
             transport=transport,
         )
@@ -100,12 +108,14 @@ class HHApiClient:
             status = exc.response.status_code
             detail = _error_types(exc.response)
             suffix = f" ({detail})" if detail else ""
-            raise HHApiError(f"HH API returned HTTP {status} for {path}{suffix}") from exc
+            raise HHApiError(f"HH API returned HTTP {status} for {path}{suffix}", status_code=status) from exc
         except httpx.RequestError as exc:
             raise HHApiError(f"Network error while requesting {path}: {exc}") from exc
 
         if response.status_code != 200:
-            raise HHApiError(f"HH API returned HTTP {response.status_code} for {path}")
+            raise HHApiError(
+                f"HH API returned HTTP {response.status_code} for {path}", status_code=response.status_code
+            )
 
         try:
             data = response.json()

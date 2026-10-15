@@ -4,8 +4,9 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path, PureWindowsPath
 
+from src.api.auth import HHAuthError, resolve_access_token
 from src.api.client import HHApiClient, HHApiError
-from src.config import HH_MAX_PER_PAGE, OUTPUT_DIR
+from src.config import HH_ACCESS_TOKEN, HH_CLIENT_ID, HH_CLIENT_SECRET, HH_MAX_PER_PAGE, OUTPUT_DIR
 from src.exporters import export_vacancies_to_excel
 from src.models import deduplicate_vacancies, parse_vacancies
 
@@ -16,6 +17,10 @@ EXCEL_SUFFIX = ".xlsx"
 EXIT_OK = 0
 EXIT_FAILURE = 1
 EXIT_INTERRUPTED = 130
+
+ANONYMOUS_FORBIDDEN_HINT = (
+    "Anonymous access may be restricted; configure HH_ACCESS_TOKEN or HH_CLIENT_ID/HH_CLIENT_SECRET"
+)
 
 
 def query_text(value: str) -> str:
@@ -107,12 +112,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 async def run(args: argparse.Namespace) -> None:
-    async with HHApiClient() as client:
-        raw_items = await client.search_all_vacancies(
-            args.query,
-            per_page=args.per_page,
-            max_vacancies=args.max_vacancies,
-        )
+    access_token = await resolve_access_token(HH_ACCESS_TOKEN, HH_CLIENT_ID, HH_CLIENT_SECRET)
+    try:
+        async with HHApiClient(access_token=access_token) as client:
+            raw_items = await client.search_all_vacancies(
+                args.query,
+                per_page=args.per_page,
+                max_vacancies=args.max_vacancies,
+            )
+    except HHApiError as exc:
+        if access_token is None and exc.status_code == 403:
+            raise HHApiError(f"{exc}. {ANONYMOUS_FORBIDDEN_HINT}", status_code=403) from exc
+        raise
 
     vacancies = parse_vacancies(raw_items)
     unique_vacancies = deduplicate_vacancies(vacancies)
@@ -132,7 +143,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     coroutine = run(args)
     try:
         asyncio.run(coroutine)
-    except HHApiError as exc:
+    except (HHApiError, HHAuthError) as exc:
         return _fail(str(exc))
     except OSError as exc:
         return _fail(f"could not save Excel file: {_describe_os_error(exc)}")
