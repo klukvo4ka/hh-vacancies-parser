@@ -30,8 +30,9 @@ class HHApiClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         headers = {"User-Agent": HH_USER_AGENT}
-        if access_token:
-            headers["Authorization"] = f"Bearer {access_token}"
+        token = access_token.strip() if access_token else None
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         self._http = httpx.AsyncClient(
             base_url=HH_API_BASE_URL,
             headers=headers,

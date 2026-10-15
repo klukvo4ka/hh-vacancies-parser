@@ -7,6 +7,18 @@ class HHAuthError(RuntimeError):
     """Raised when HH credentials are misconfigured or an application token cannot be obtained."""
 
 
+_OAUTH_ERROR_CODES = frozenset(
+    {
+        "invalid_request",
+        "invalid_client",
+        "invalid_grant",
+        "unauthorized_client",
+        "unsupported_grant_type",
+        "invalid_scope",
+    }
+)
+
+
 async def resolve_access_token(
     access_token: str | None,
     client_id: str | None,
@@ -72,15 +84,15 @@ async def get_application_token(
 
 
 def _oauth_error(response: httpx.Response) -> str:
-    """Return HH's short OAuth error code/description (e.g. 'invalid_client') without the body."""
+    """Return a recognized OAuth error code without exposing response content."""
     try:
         data = response.json()
     except ValueError:
         return ""
     if not isinstance(data, dict):
         return ""
-    parts = [data.get("error"), data.get("error_description")]
-    return ": ".join(part for part in parts if isinstance(part, str) and part and len(part) <= 100)
+    error = data.get("error")
+    return error if error in _OAUTH_ERROR_CODES else ""
 
 
 def _blank_to_none(value: str | None) -> str | None:

@@ -116,7 +116,7 @@ class TestApplicationTokenRequest:
         [
             (
                 TokenEndpoint(400, json={"error": "invalid_client", "error_description": "account not found"}),
-                r"HTTP 400 \(invalid_client: account not found\)",
+                r"HTTP 400 \(invalid_client\)$",
             ),
             (TokenEndpoint(403, json={"errors": [{"type": "forbidden"}]}), "HTTP 403$"),
             (TokenEndpoint(500, text="<html>" + "x" * 5000), "HTTP 500$"),
@@ -148,7 +148,8 @@ class TestApplicationTokenRequest:
     @pytest.mark.parametrize(
         "response",
         [
-            {"status": 400, "json": {"error": "invalid_client", "error_description": FAKE_SECRET + "x" * 100}},
+            {"status": 400, "json": {"error": "invalid_client", "error_description": FAKE_SECRET}},
+            {"status": 400, "json": {"error": FAKE_SECRET, "error_description": "account not found"}},
             {"status": 400, "json": {"error": "invalid_request", "client_secret": FAKE_SECRET}},
             {"status": 200, "json": {"token": FAKE_APP_TOKEN}},
             {"status": 500, "text": f"secret={FAKE_SECRET}"},
@@ -175,7 +176,7 @@ class TestApiClientAuthorization:
         self.search_all(fake, None)
         assert all("Authorization" not in request.headers for request in fake.requests)
 
-    @pytest.mark.parametrize("token", ["", None])
+    @pytest.mark.parametrize("token", ["", "   ", None])
     def test_empty_token_is_anonymous(self, token: str | None) -> None:
         fake = FakeHH(10)
         self.search_all(fake, token)
