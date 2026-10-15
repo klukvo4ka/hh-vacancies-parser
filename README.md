@@ -11,3 +11,5 @@ A Python tool for searching vacancies through the official [HeadHunter API](http
 ## Status
 
 The project is under active development.
+
+Currently the tool can query the official HH API vacancy search and load a single page of results. Pagination and Excel export are not implemented yet.
