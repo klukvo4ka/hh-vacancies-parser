@@ -7,7 +7,7 @@ from pathlib import Path, PureWindowsPath
 from src.api.client import HHApiClient, HHApiError
 from src.config import HH_MAX_PER_PAGE, OUTPUT_DIR
 from src.exporters import export_vacancies_to_excel
-from src.models import parse_vacancies
+from src.models import deduplicate_vacancies, parse_vacancies
 
 DEFAULT_MAX_VACANCIES = 200
 DEFAULT_OUTPUT_FILENAME = "vacancies.xlsx"
@@ -115,11 +115,14 @@ async def run(args: argparse.Namespace) -> None:
         )
 
     vacancies = parse_vacancies(raw_items)
-    output_path = export_vacancies_to_excel(vacancies, OUTPUT_DIR / args.output)
+    unique_vacancies = deduplicate_vacancies(vacancies)
+    output_path = export_vacancies_to_excel(unique_vacancies, OUTPUT_DIR / args.output)
 
     print(f"Query: {args.query}")
     print(f"Loaded: {len(raw_items)} vacancies")
     print(f"Parsed: {len(vacancies)} vacancies")
+    print(f"Unique: {len(unique_vacancies)} vacancies")
+    print(f"Removed duplicates: {len(vacancies) - len(unique_vacancies)}")
     print(f"Saved to: {output_path}")
 
 
