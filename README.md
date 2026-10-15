@@ -8,6 +8,23 @@ A Python tool for searching vacancies through the official [HeadHunter API](http
 - [httpx](https://www.python-httpx.org/)
 - [openpyxl](https://openpyxl.readthedocs.io/)
 
+## Usage
+
+```bash
+python -m src.main "Python developer"
+python -m src.main "Data analyst" --max 300
+python -m src.main "Backend developer" --per-page 50 --output backend.xlsx
+```
+
+| Option | Description | Default |
+|---|---|---|
+| `query` | Search text (required) | — |
+| `--max N` | Maximum number of vacancies to load | `200` |
+| `--per-page N` | Vacancies per API request (1–100) | `100` |
+| `--output FILE` | Excel file name inside `output/`; `.xlsx` is added if omitted | `vacancies.xlsx` |
+
+The workbook is saved to `output/`, e.g. `output/vacancies.xlsx`. Run `python -m src.main --help` for details.
+
 ## Status
 
 The project is under active development.

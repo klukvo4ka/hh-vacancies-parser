@@ -10,7 +10,7 @@ build/
 dist/
 
 # Generated Excel files
-output/*.xlsx
+output/*.[xX][lL][sS][xX]
 
 # macOS
 .DS_Store
