@@ -13,6 +13,10 @@ DEFAULT_MAX_VACANCIES = 200
 DEFAULT_OUTPUT_FILENAME = "vacancies.xlsx"
 EXCEL_SUFFIX = ".xlsx"
 
+EXIT_OK = 0
+EXIT_FAILURE = 1
+EXIT_INTERRUPTED = 130
+
 
 def query_text(value: str) -> str:
     query = value.strip()
@@ -119,15 +123,34 @@ async def run(args: argparse.Namespace) -> None:
     print(f"Saved to: {output_path}")
 
 
-def main(argv: Sequence[str] | None = None) -> None:
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI and return an exit code; argparse exits with 2 on invalid usage."""
     args = parse_args(argv)
+    coroutine = run(args)
     try:
-        asyncio.run(run(args))
+        asyncio.run(coroutine)
     except HHApiError as exc:
-        sys.exit(f"Error: {exc}")
+        return _fail(str(exc))
     except OSError as exc:
-        sys.exit(f"Error: could not save Excel file: {exc}")
+        return _fail(f"could not save Excel file: {_describe_os_error(exc)}")
+    except KeyboardInterrupt:
+        print("Interrupted", file=sys.stderr)
+        return EXIT_INTERRUPTED
+    finally:
+        coroutine.close()
+    return EXIT_OK
+
+
+def _fail(message: str) -> int:
+    print(f"Error: {message}", file=sys.stderr)
+    return EXIT_FAILURE
+
+
+def _describe_os_error(exc: OSError) -> str:
+    if exc.strerror and exc.filename:
+        return f"{exc.strerror}: {exc.filename}"
+    return exc.strerror or str(exc)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

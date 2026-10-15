@@ -25,6 +25,17 @@ python -m src.main "Backend developer" --per-page 50 --output backend.xlsx
 
 The workbook is saved to `output/`, e.g. `output/vacancies.xlsx`. Run `python -m src.main --help` for details.
 
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success, including a search with no results |
+| `1` | Runtime error: HH API, network or Excel save failure |
+| `2` | Invalid command-line usage |
+| `130` | Interrupted with Ctrl-C |
+
+Expected runtime errors are printed to stderr as a short `Error: ...` message without a traceback. If any page fails to load, no workbook is written.
+
 ## Status
 
 The project is under active development.
