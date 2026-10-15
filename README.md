@@ -12,4 +12,4 @@ A Python tool for searching vacancies through the official [HeadHunter API](http
 
 The project is under active development.
 
-Currently the tool can query the official HH API vacancy search and load multiple result pages sequentially. The number of loaded vacancies is capped by a configured maximum and by HH's search depth limit (2000 results). Excel export is not implemented yet.
+Currently the tool can query the official HH API vacancy search and load multiple result pages sequentially. The number of loaded vacancies is capped by a configured maximum and by HH's search depth limit (2000 results). Raw API responses are normalized into typed `Vacancy` objects. Excel export is not implemented yet.
