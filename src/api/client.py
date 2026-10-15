@@ -1,9 +1,16 @@
+import math
 from types import TracebackType
 from typing import Any, Self
 
 import httpx
 
-from src.config import HH_API_BASE_URL, HH_MAX_PER_PAGE, HH_REQUEST_TIMEOUT, HH_USER_AGENT
+from src.config import (
+    HH_API_BASE_URL,
+    HH_MAX_PER_PAGE,
+    HH_MAX_SEARCH_RESULTS,
+    HH_REQUEST_TIMEOUT,
+    HH_USER_AGENT,
+)
 
 
 class HHApiError(RuntimeError):
@@ -52,6 +59,36 @@ class HHApiClient:
         if not isinstance(data.get("items"), list):
             raise HHApiError("Unexpected /vacancies response: 'items' list is missing")
         return data
+
+    async def search_all_vacancies(
+        self,
+        text: str,
+        *,
+        per_page: int = HH_MAX_PER_PAGE,
+        max_vacancies: int = 500,
+    ) -> list[dict[str, Any]]:
+        """Load result pages sequentially until the limit, the last page or HH's depth cap."""
+        _validate_search_params(text, 0, per_page)
+        if max_vacancies < 1:
+            raise ValueError(f"max_vacancies must be >= 1, got {max_vacancies}")
+
+        limit = min(max_vacancies, HH_MAX_SEARCH_RESULTS)
+        # HH rejects pages that reach past the depth cap, so only full in-range pages are requested.
+        max_pages = min(math.ceil(limit / per_page), HH_MAX_SEARCH_RESULTS // per_page)
+
+        vacancies: list[dict[str, Any]] = []
+        for page in range(max_pages):
+            data = await self.search_vacancies(text, page=page, per_page=per_page)
+            items = data["items"]
+            vacancies.extend(items)
+
+            if not items or len(items) < per_page or len(vacancies) >= limit:
+                break
+            total_pages = data.get("pages")
+            if isinstance(total_pages, int) and page >= total_pages - 1:
+                break
+
+        return vacancies[:limit]
 
     async def _get_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         try:

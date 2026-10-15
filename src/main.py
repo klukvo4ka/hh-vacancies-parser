@@ -4,17 +4,15 @@ import sys
 from src.api.client import HHApiClient, HHApiError
 
 SEARCH_QUERY = "Python developer"
+MAX_VACANCIES = 200
 
 
 async def run() -> None:
     async with HHApiClient() as client:
-        data = await client.search_vacancies(SEARCH_QUERY)
+        vacancies = await client.search_all_vacancies(SEARCH_QUERY, max_vacancies=MAX_VACANCIES)
 
     print(f"Query: {SEARCH_QUERY}")
-    print(f"Found: {data.get('found', 0)} vacancies")
-    print(f"Loaded: {len(data['items'])} vacancies")
-    if data.get("pages"):
-        print(f"Page: {data.get('page', 0) + 1}/{data['pages']}")
+    print(f"Loaded: {len(vacancies)} vacancies")
 
 
 def main() -> None:
